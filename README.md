@@ -204,7 +204,7 @@ The application will be available at `http://localhost:8501`
 
 ### Watch the Demo Video
 
-[![Zoro GitHub API Assistant Demo](https://img.shields.io/badge/Watch%20Demo-Video%20Demo-red?style=for-the-badge&logo=youtube)](demo.mp4)
+[![Zoro GitHub API Assistant Demo](https://img.shields.io/badge/Watch%20Demo-Video%20Demo-red?style=for-the-badge&logo=youtube)](demo_compressed.mp4)
 
 *Click the button above to watch the full demo video*
 
