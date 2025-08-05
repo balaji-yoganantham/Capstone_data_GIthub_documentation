@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250731_143625_29d50428",
+  "timestamp": "2025-07-31T14:36:25.938678",
+  "question": "hi im balaji",
+  "answer": "Hi Balaji! Nice to meet you. I'd be happy to help you with creating multiple issues in a GitHub repository using the GitHub API. As we previously discussed, you can use the `POST /repos/owner/repository/issues` endpoint to create a new issue. To create multiple issues, you'll need to send multiple requests to this endpoint with the relevant issue details in the request body.\n\nIf you want to list open issues with a specific label, such as \"bug\", you can use the `GET /repos/owner/repository/issues` endpoint with the `state` and `labels` query parameters. For example, `GET /repos/octocat/Spoon-Knife/issues?state=open&labels=bug`. This will return an array of Issue objects in JSON format.\n\nRemember to authenticate your requests with a personal access token or OAuth token in the `Authorization` header. If you have any specific questions about this process or need help with authentication, feel free to ask!",
+  "metadata": {
+    "confidence": 1.0,
+    "response_time": 2.135499,
+    "sources_count": 1,
+    "memory_size": 4
+  }
+}

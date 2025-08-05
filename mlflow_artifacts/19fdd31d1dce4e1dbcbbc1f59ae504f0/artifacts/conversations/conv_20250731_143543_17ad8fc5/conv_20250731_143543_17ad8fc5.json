@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250731_143543_17ad8fc5",
+  "timestamp": "2025-07-31T14:35:43.463018",
+  "question": "hii",
+  "answer": "Hi! It seems like you're trying to create multiple issues in a GitHub repository using the GitHub API. You're using the `POST /repos/owner/repository/issues` endpoint to create a new issue with a title, body, labels, and assignees.\n\nTo clarify, you need to authenticate with the GitHub API using a personal access token or OAuth token to create issues. You can pass the token in the `Authorization` header of your request.\n\nIf you want to create multiple issues, you'll need to send multiple requests to the `POST /repos/owner/repository/issues` endpoint with the relevant issue details in the request body.\n\nIf you have any specific questions about this process or need help with authentication, feel free to ask!",
+  "metadata": {
+    "response_time": 3.334421,
+    "confidence": 0.8999999999999999,
+    "sources_count": 1,
+    "memory_size": 2,
+    "answer_length": 714,
+    "question_length": 3,
+    "answer_question_ratio": 238.0
+  }
+}

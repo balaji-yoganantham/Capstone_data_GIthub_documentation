@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250801_175924_3d42622b",
+  "timestamp": "2025-08-01T17:59:24.641391",
+  "question": "what is my name ",
+  "answer": "Confidence Score: 100\n\nAnswer:\nHi Balaji! I remember you introduced yourself earlier. Your name is indeed Balaji.",
+  "metadata": {
+    "response_time": 1.257171,
+    "confidence": 0.6000000000000001,
+    "sources_count": 1,
+    "memory_size": 6,
+    "answer_length": 113,
+    "question_length": 16,
+    "answer_question_ratio": 7.0625
+  }
+}

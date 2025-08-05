@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250801_175850_072f3930",
+  "timestamp": "2025-08-01T17:58:50.891503",
+  "question": "my name is balaji ",
+  "answer": "Confidence Score: 90\n\nAnswer:\nHi Balaji! As your GitHub API assistant, I can help you with a wide range of tasks and questions related to the GitHub API. I can assist you in creating, managing, and retrieving data from GitHub repositories, users, issues, pull requests, and more. \n\nSpecifically, I can help you with:\n\n* Creating and managing repositories, including creating new repositories, updating repository information, and deleting repositories.\n* Managing issues, including creating new issues, updating issue information, and closing issues.\n* Working with pull requests, including creating new pull requests, updating pull request information, and merging pull requests.\n* Retrieving data about users, including user profiles, repositories, and organizations.\n* And much more!\n\nIf you have a specific question or task in mind, feel free to ask, and I'll do my best to help you out.",
+  "metadata": {
+    "confidence": 0.7,
+    "response_time": 2.158575,
+    "sources_count": 1,
+    "memory_size": 4
+  }
+}

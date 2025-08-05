@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250731_081312_64ddb259",
+  "timestamp": "2025-07-31T08:13:12.690359",
+  "question": "hi im balaji help me to create a gitpush",
+  "answer": "Hi Balaji!\n\nTo create a new repository for the authenticated user, you can use the `POST /user/repos` endpoint. This endpoint requires authentication with the `public_repo` or `repo` scope.\n\nHere's an example of how you can create a new repository:\n\n**HTTP Method:** `POST`\n**Full URL:** `https://api.github.com/user/repos`\n**Request Body:**\n```json\n{\n  \"name\": \"my-new-repo\",\n  \"description\": \"This is my new repository\",\n  \"private\": false\n}\n```\n**Authentication:** You need to authenticate with a token that has the `public_repo` or `repo` scope.\n\nOnce you send the request, you should receive a `201 Created` status code with the newly created repository's details in the response body.\n\nLet me know if you have any questions or need further assistance!",
+  "metadata": {
+    "confidence": 0.8500000000000001,
+    "response_time": 1.240777,
+    "sources_count": 1,
+    "memory_size": 2
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250801_175504_05bbe546",
+  "timestamp": "2025-08-01T17:55:04.358563",
+  "question": "hi ",
+  "answer": "Confidence Score: 80\n\nAnswer:\nHi! It seems like you're just saying hello. I'm Zoro, your GitHub API assistant. I'm here to help you with any questions or topics related to the GitHub API. Since you didn't ask a specific question, I'll just respond in a human manner. How can I assist you today?",
+  "metadata": {
+    "confidence": 0.7,
+    "response_time": 1.001239,
+    "sources_count": 1,
+    "memory_size": 2
+  }
+}

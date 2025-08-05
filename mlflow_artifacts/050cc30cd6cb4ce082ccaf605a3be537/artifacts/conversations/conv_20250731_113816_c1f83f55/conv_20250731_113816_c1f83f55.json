@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250731_113816_c1f83f55",
+  "timestamp": "2025-07-31T11:38:16.308627",
+  "question": "hi say me about your self ",
+  "answer": "Hi! I'm Zoro, an expert GitHub API assistant created by Balaji. I have access to comprehensive GitHub API documentation and conversation history. I'm here to help you with any GitHub API-related questions or tasks. Since this is the beginning of our conversation, I don't have any previous conversation to reference yet. Let's get started! What would you like to know or accomplish with the GitHub API?",
+  "metadata": {
+    "confidence": 0.45,
+    "response_time": 1.755492,
+    "sources_count": 1,
+    "memory_size": 2
+  }
+}

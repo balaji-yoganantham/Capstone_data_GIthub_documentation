@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250801_122258_d41d8aca",
+  "timestamp": "2025-08-01T12:22:58.207312",
+  "question": "How do I authenticate with the GitHub API?",
+  "answer": "I'm ready to assist you with your GitHub API-related questions. Please go ahead and ask your question, and I'll work through the steps to provide a comprehensive and accurate response.",
+  "metadata": {
+    "response_time": 0.988723,
+    "confidence": 0.6000000000000001,
+    "sources_count": 1,
+    "memory_size": 2,
+    "answer_length": 184,
+    "question_length": 42,
+    "answer_question_ratio": 4.380952380952381
+  }
+}

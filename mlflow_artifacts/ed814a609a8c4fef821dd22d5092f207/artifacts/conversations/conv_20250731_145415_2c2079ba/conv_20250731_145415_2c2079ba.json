@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250731_145415_2c2079ba",
+  "timestamp": "2025-07-31T14:54:15.174233",
+  "question": "hi im balaji, help me with creating a user in the github  with the username Balajiyoganantham1234 give the code in python ",
+  "answer": "Hi Balaji!\n\nTo create a new user on GitHub, you'll need to use the GitHub API's `POST /users` endpoint. However, this endpoint is only available for GitHub Enterprise Server and not for the standard GitHub API.\n\nInstead, you can create a new user by signing up on the GitHub website or by using the GitHub API to create an OAuth token for an existing user.\n\nIf you want to update the username of an existing user, you can use the `PATCH /user` endpoint. Here's an example in Python using the `requests` library:\n```python\nimport requests\n\npersonal_access_token = \"YOUR_PERSONAL_ACCESS_TOKEN\"\nusername = \"Balajiyoganantham1234\"\n\nheaders = {\n    \"Authorization\": f\"token {personal_access_token}\",\n    \"Accept\": \"application/vnd.github.v3+json\"\n}\n\ndata = {\"login\": username}\n\nresponse = requests.patch(\"https://api.github.com/user\", headers=headers, json=data)\n\nif response.status_code == 200:\n    print(\"Username updated successfully!\")\nelse:\n    print(\"Error updating username:\", response.text)\n```\nNote that you'll need to replace `YOUR_PERSONAL_ACCESS_TOKEN` with a valid personal access token with the `user` scope.\n\nAlso, keep in mind that updating a username will also update the URL of the user's profile page and may affect any existing links or references to the user's profile.\n\nLet me know if you have any further questions or if there's anything else I can help you with!",
+  "metadata": {
+    "response_time": 1.958381,
+    "confidence": 0.8999999999999999,
+    "sources_count": 1,
+    "memory_size": 2,
+    "answer_length": 1381,
+    "question_length": 122,
+    "answer_question_ratio": 11.319672131147541
+  }
+}

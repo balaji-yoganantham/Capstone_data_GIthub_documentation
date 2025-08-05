@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250805_141844_b1f4f01d",
+  "timestamp": "2025-08-05T14:18:44.527918",
+  "question": "what is my name ?",
+  "answer": "Confidence Score: 100\n\nHi Balaji!\n\nYour name is Balaji Yoganantham. I remember you from our previous conversations!",
+  "metadata": {
+    "response_time": 1.446187,
+    "confidence": 0.6000000000000001,
+    "sources_count": 1,
+    "memory_size": 8,
+    "answer_length": 115,
+    "question_length": 17,
+    "answer_question_ratio": 6.764705882352941
+  }
+}

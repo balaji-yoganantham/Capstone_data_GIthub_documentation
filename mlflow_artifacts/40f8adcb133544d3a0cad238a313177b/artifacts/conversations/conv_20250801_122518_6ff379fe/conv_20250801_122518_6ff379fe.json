@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250801_122518_6ff379fe",
+  "timestamp": "2025-08-01T12:25:18.883390",
+  "question": "How can I search for repositories?",
+  "answer": "Answer:\n\nTo search for repositories using the GitHub API, you can use the `GET /search/repositories` endpoint. This endpoint allows you to search for repositories based on various criteria, such as repository name, description, language, and more.\n\nTo make this API call, you'll need to authenticate with the GitHub API using a Personal Access Token or OAuth token. You can include this token in the `Authorization` header of your request.\n\nHere's an example of the API call:\n```bash\nGET https://api.github.com/search/repositories?q=language:python+stars:>100\nAuthorization: Bearer YOUR_PERSONAL_ACCESS_TOKEN\n```\nReplace `YOUR_PERSONAL_ACCESS_TOKEN` with your actual token.\n\nIn the `q` parameter, you can specify the search query using various keywords and operators. In this example, we're searching for repositories with the Python language and more than 100 stars.\n\nThe response will be a JSON object containing a list of repository objects that match the search query. Each repository object will contain information such as the repository name, description, language, and URL.\n\nYou can also use other parameters to refine your search, such as `sort` and `order`. For a complete list of parameters, please refer to the GitHub API documentation.\n\nAs we discussed earlier, authenticating with the GitHub API using a Personal Access Token or OAuth token is essential to avoid hitting the unauthenticated rate limit and to ensure you have the necessary permissions to access the desired resources.\n\nRemember to check the GitHub API documentation for the most up-to-date information on searching for repositories and other API usage guidelines.\n\nI hope this helps you search for repositories using the GitHub API! Let me know if you have any further questions.",
+  "metadata": {
+    "response_time": 54.836861,
+    "confidence": 0.95,
+    "sources_count": 1,
+    "memory_size": 14,
+    "answer_length": 1759,
+    "question_length": 34,
+    "answer_question_ratio": 51.73529411764706
+  }
+}

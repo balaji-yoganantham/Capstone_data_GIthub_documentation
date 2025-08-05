@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250731_141208_7a00e83e",
+  "timestamp": "2025-07-31T14:12:08.432692",
+  "question": "hi ",
+  "answer": "Hi! It seems like you're interested in creating issues on GitHub using the GitHub API. Based on the response status code and format you provided, I'm assuming you're looking to create a new issue.\n\nTo create a new issue, you can use the `POST /repos/{owner}/{repo}/issues` endpoint. This endpoint requires authentication, so you'll need to provide a valid GitHub token or credentials.\n\nHere's an example of the request:\n\n`POST /repos/{owner}/{repo}/issues`\n\nWith the following JSON payload:\n\n```json\n{\n  \"title\": \"Issue title\",\n  \"body\": \"Issue body\"\n}\n```\n\nThis will create a new issue with the specified title and body. The response will be an `Issue` object in JSON format, and the status code will be `201 Created` if the issue is created successfully.\n\nLet me know if you have any questions or need further assistance!",
+  "metadata": {
+    "confidence": 0.8500000000000001,
+    "response_time": 1.604185,
+    "sources_count": 1,
+    "memory_size": 2
+  }
+}

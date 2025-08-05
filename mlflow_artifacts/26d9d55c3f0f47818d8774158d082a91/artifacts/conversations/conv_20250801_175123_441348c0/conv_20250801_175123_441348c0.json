@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250801_175123_441348c0",
+  "timestamp": "2025-08-01T17:51:23.742831",
+  "question": "hi",
+  "answer": "Confidence Score: 80\n\nAnswer:\n\nHi! It seems like you're interested in creating a new issue on GitHub using the API. The response status code 201 Created and the response format being an Issue object in JSON suggests that you're looking to create a new issue.\n\nTo create a new issue, you can use the `POST /repos/{owner}/{repo}/issues` endpoint. This endpoint requires authentication, so you'll need to provide a valid GitHub token or credentials.\n\nThe required parameters for this endpoint include `title` and `body`, which are the title and description of the issue, respectively. You can also provide optional parameters such as `assignee`, `milestone`, and `labels` to further customize the issue.\n\nHere's an example of what the API call might look like:\n```bash\ncurl -X POST \\\n  https://api.github.com/repos/{owner}/{repo}/issues \\\n  -H 'Authorization: Bearer YOUR_GITHUB_TOKEN' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"title\":\"New Issue\",\"body\":\"This is a new issue\",\"assignee\":\"username\",\"milestone\":1,\"labels\":[\"bug\",\"enhancement\"]}'\n```\nThis would create a new issue with the specified title, body, assignee, milestone, and labels.\n\nIf you have any specific questions about this endpoint or need further assistance, feel free to ask!",
+  "metadata": {
+    "response_time": 1.702695,
+    "confidence": 0.8999999999999999,
+    "sources_count": 1,
+    "memory_size": 2,
+    "answer_length": 1250,
+    "question_length": 2,
+    "answer_question_ratio": 625.0
+  }
+}

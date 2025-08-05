@@ -1,0 +1,35 @@
+# Requirements for Zoro - GitHub API Assistant with MLflow Integration
+# Core UI and Visualization
+streamlit
+plotly
+pandas
+numpy
+
+# MLflow Integration
+mlflow
+
+# Logging and Utilities
+loguru
+psutil
+
+# RAG System and LLM
+langchain
+chromadb
+langchain_community
+langchain_groq 
+sentence-transformers
+langchain-huggingface
+
+# If using Groq API (for Llama3-70B)
+groq
+
+# For environment variable management
+python-dotenv
+
+# For evaluation metrics
+scikit-learn
+rouge-score
+
+# Additional utilities
+requests
+tqdm

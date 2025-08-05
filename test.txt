@@ -1,0 +1,1345 @@
+# rag_system.py
+# Handles the core RAG system logic for the Streamlit RAG app
+
+import os
+import glob
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.document_loaders import TextLoader
+from langchain.schema import Document
+from langchain.prompts import PromptTemplate
+from langchain.chains import RetrievalQA
+from langchain.memory import ConversationBufferWindowMemory
+from langchain_groq import ChatGroq
+from evaluation import EvaluationDataset, RAGEvaluator
+import statistics
+
+from config import (
+    GROQ_API_KEY, GROQ_MODEL_NAME, EMBEDDING_MODEL_NAME, DOCUMENTS_FOLDER,
+    CHUNK_SIZE, CHUNK_OVERLAP, COLLECTION_NAME
+)
+
+logger = logging.getLogger(__name__)
+
+class LangChainRAGSystem:
+    """RAG System using LangChain with Groq and ChromaDB"""
+    def __init__(self):
+        self.embeddings = None
+        self.vectorstore = None
+        self.llm = None
+        self.qa_chain = None
+        self.memory = None
+        self.text_splitter = None
+        self.evaluator = None
+        self.evaluation_dataset = EvaluationDataset()
+    def initialize_components(self, groq_api_key: str = None):
+        try:
+            api_key = groq_api_key or GROQ_API_KEY
+            if not api_key:
+                raise ValueError("Groq API key not provided in code or parameter")
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=EMBEDDING_MODEL_NAME,
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+            self.llm = ChatGroq(
+                groq_api_key=api_key,
+                model_name=GROQ_MODEL_NAME,
+                temperature=0.1,
+                max_tokens=1000
+            )
+            # Sliding window chunking
+            self.text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                length_function=len,
+                separators=["\n\n", "\n", " ", ""]
+            )
+            self.memory = ConversationBufferWindowMemory(
+                memory_key="chat_history",
+                return_messages=True,
+                k=6
+            )
+            logger.info("All components initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error initializing components: {e}")
+            return False
+    def load_documents(self, folder_path: str) -> List[Document]:
+        documents = []
+        if not os.path.exists(folder_path):
+            logger.error(f"Documents folder not found: {folder_path}")
+            return documents
+        txt_files = glob.glob(os.path.join(folder_path, "*.txt"))
+        for file_path in txt_files:
+            try:
+                loader = TextLoader(file_path, encoding='utf-8')
+                docs = loader.load()
+                for doc in docs:
+                    doc.metadata.update({
+                        'source_file': os.path.basename(file_path),
+                        'source_path': file_path
+                    })
+                    documents.extend([doc])
+                logger.info(f"Loaded document: {os.path.basename(file_path)}")
+            except Exception as e:
+                logger.error(f"Error loading {file_path}: {e}")
+        return documents
+    def create_vectorstore(self, folder_path: str):
+        try:
+            documents = self.load_documents(folder_path)
+            if not documents:
+                logger.warning("No documents found to process")
+                return False
+            texts = self.text_splitter.split_documents(documents)
+            self.vectorstore = Chroma.from_documents(
+                documents=texts,
+                embedding=self.embeddings,
+                collection_name=COLLECTION_NAME,
+                persist_directory="./chroma_db"
+            )
+            self.vectorstore.persist()
+            logger.info(f"Created vectorstore with {len(texts)} chunks")
+            return True
+        except Exception as e:
+            logger.error(f"Error creating vectorstore: {e}")
+            return False
+    def generate_step_back_question(self, original_question: str) -> str:
+        step_back_prompt = f"""Given the following specific question about GitHub API:\n"{original_question}"\n\nGenerate a broader, more general question that would help understand the fundamental concepts needed to answer the original question. The step-back question should focus on general principles or broader categories.\n\nExamples:\n- Specific: \"How do I create a repository using POST /user/repos?\"\n- Step-back: \"What are the general patterns for creating resources via GitHub API?\"\n\n- Specific: \"How do I authenticate with personal access tokens?\"\n- Step-back: \"What are the different authentication methods available in GitHub API?\"\n\nStep-back question:"""
+        try:
+            response = self.llm.invoke(step_back_prompt)
+            return response.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating step-back question: {e}")
+            return f"What are the general principles and concepts related to {original_question}?"
+    def setup_qa_chain(self):
+        try:
+            prompt_template = """You are Zoro, an expert AI assistant created by Balaji, specializing in GitHub API documentation.\n\nSTEP-BACK REASONING APPROACH:\n1. First, I'll consider the broader context and fundamental principles\n2. Then, I'll provide specific, actionable guidance for the user's question\n\nStep-back question: {step_back_question}\nBroader context from documentation: {step_back_context}\n\nOriginal question: {question}\nSpecific context from documentation: {context}\n\nChat History: {chat_history}\n\nREASONING PROCESS:\nLet me think through this systematically:\n\n1. **Understanding the broader context**: Based on the step-back analysis, what are the fundamental principles at play?\n\n2. **Connecting to specific needs**: How do these general principles apply to the user's specific question?\n\n3. **Practical implementation**: What are the concrete steps the user should take?\n\nRESPONSE GUIDELINES:\n- Start with essential concepts if helpful for understanding\n- Provide practical, actionable guidance\n- Include relevant code examples or API endpoint details\n- Keep responses comprehensive but concise\n- Use the retrieved documentation context as your primary source\n\nAnswer:"""
+            prompt = PromptTemplate(
+                template=prompt_template,
+                input_variables=["context", "question", "chat_history", "step_back_question", "step_back_context"]
+            )
+            self.qa_chain = RetrievalQA.from_chain_type(
+                llm=self.llm,
+                chain_type="stuff",
+                retriever=self.vectorstore.as_retriever(
+                    search_type="similarity",
+                    search_kwargs={"k": 3}
+                ),
+                return_source_documents=True
+            )
+            logger.info("QA chain setup successfully with step-back prompting")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting up QA chain: {e}")
+            return False
+    def get_response(self, question: str) -> Dict[str, Any]:
+        try:
+            step_back_question = self.generate_step_back_question(question)
+            original_docs = self.vectorstore.similarity_search(question, k=3)
+            step_back_docs = self.vectorstore.similarity_search(step_back_question, k=2)
+            original_context = "\n\n".join([doc.page_content for doc in original_docs])
+            step_back_context = "\n\n".join([doc.page_content for doc in step_back_docs])
+            chat_history = self.memory.chat_memory.messages if self.memory else []
+            history_text = "\n".join([f"{msg.type}: {msg.content}" for msg in chat_history[-6:]])
+            enhanced_prompt = f"""You are Zoro, an expert AI assistant created by Balaji, specializing in GitHub API documentation.\n\nSTEP-BACK REASONING APPROACH:\n1. First, I'll consider the broader context and fundamental principles\n2. Then, I'll provide specific, actionable guidance for the user's question\n\nStep-back question: {step_back_question}\nBroader context from documentation: {step_back_context}\n\nOriginal question: {question}\nSpecific context from documentation: {original_context}\n\nChat History: {history_text}\n\nREASONING PROCESS:\nLet me think through this systematically:\n\n1. **Understanding the broader context**: Based on the step-back analysis, what are the fundamental principles at play?\n\n2. **Connecting to specific needs**: How do these general principles apply to the user's specific question?\n\n3. **Practical implementation**: What are the concrete steps the user should take?\n\nRESPONSE GUIDELINES:\n- Start with essential concepts if helpful for understanding\n- Provide practical, actionable guidance\n- Include relevant code examples or API endpoint details\n- Keep responses comprehensive but concise\n- Use the retrieved documentation context as your primary source\n\nAnswer:"""
+            response = self.llm.invoke(enhanced_prompt)
+            all_docs = original_docs + step_back_docs
+            sources = list(set([
+                doc.metadata.get('source_file', 'Unknown')
+                for doc in all_docs
+            ]))
+            self.memory.chat_memory.add_user_message(question)
+            self.memory.chat_memory.add_ai_message(response.content)
+            return {
+                "response": response.content,
+                "sources": sources,
+                "source_documents": len(all_docs),
+                "step_back_question": step_back_question,
+                "retrieved_chunks": [
+                    {
+                        "content": doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content,
+                        "source": doc.metadata.get('source_file', 'Unknown'),
+                        "type": "original" if doc in original_docs else "step_back"
+                    }
+                    for doc in all_docs
+                ],
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            return {
+                "response": "I apologize, but I encountered an error while processing your request. Please try again.",
+                "sources": [],
+                "source_documents": 0,
+                "error": str(e)
+            }
+    def clear_memory(self):
+        if self.memory:
+            self.memory.clear()
+    def initialize_evaluator(self):
+        self.evaluator = RAGEvaluator(self)
+        logger.info("Evaluation system initialized")
+    def run_evaluation(self) -> Dict[str, Any]:
+        if not self.evaluator:
+            self.initialize_evaluator()
+        qa_pairs = self.evaluation_dataset.get_qa_pairs()
+        results = []
+        import streamlit as st
+        st.write("🔄 Running evaluation...")
+        progress_bar = st.progress(0)
+        for i, qa_pair in enumerate(qa_pairs):
+            question = qa_pair["question"]
+            try:
+                rag_response = self.get_response(question)
+                predicted_response = rag_response["response"]
+                evaluation_result = self.evaluator.evaluate_response(
+                    question, predicted_response, qa_pair
+                )
+                evaluation_result["rag_metadata"] = {
+                    "sources": rag_response.get("sources", []),
+                    "source_documents": rag_response.get("source_documents", 0),
+                    "step_back_question": rag_response.get("step_back_question", "")
+                }
+                results.append(evaluation_result)
+                progress_bar.progress((i + 1) / len(qa_pairs))
+            except Exception as e:
+                logger.error(f"Error evaluating question '{question}': {e}")
+                results.append({
+                    "question": question,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                })
+        valid_results = [r for r in results if "error" not in r]
+        if valid_results:
+            f1_scores = [r["f1_metrics"]["f1"] for r in valid_results]
+            rouge1_scores = [r["rouge_scores"]["rouge1_f"] for r in valid_results]
+            keyword_coverages = [r["keyword_coverage"] for r in valid_results]
+            aggregate_metrics = {
+                "f1_score": {
+                    "mean": statistics.mean(f1_scores),
+                    "std": statistics.stdev(f1_scores) if len(f1_scores) > 1 else 0.0,
+                    "min": min(f1_scores),
+                    "max": max(f1_scores)
+                },
+                "rouge1_f": {
+                    "mean": statistics.mean(rouge1_scores),
+                    "std": statistics.stdev(rouge1_scores) if len(rouge1_scores) > 1 else 0.0
+                },
+                "keyword_coverage": {
+                    "mean": statistics.mean(keyword_coverages),
+                    "std": statistics.stdev(keyword_coverages) if len(keyword_coverages) > 1 else 0.0
+                }
+            }
+        else:
+            aggregate_metrics = {"error": "No valid results to aggregate"}
+        return {
+            "total_questions": len(qa_pairs),
+            "successful_evaluations": len(valid_results),
+            "failed_evaluations": len([r for r in results if "error" in r]),
+            "aggregate_metrics": aggregate_metrics,
+            "individual_results": results,
+            "evaluation_timestamp": datetime.now().isoformat()
+        } 
+        --------------------------------------------------------------------------------
+        from .config import *
+from .embeddings import get_embeddings
+from .vectorstore import load_documents, create_vectorstore
+from .memory import get_conversation_memory
+from .prompts import get_custom_prompt
+from .conversational_chain import setup_conversational_chain
+from .response import calculate_confidence
+from .stats import get_conversation_stats, get_memory_summary
+
+# MLflow Integration
+try:
+    from mlflow import tracking, models
+    from mlflow.tracking import MlflowClient
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    print("Warning: MLflow not available. Install with: pip install mlflow")
+
+# Import MLflow components if available
+if MLFLOW_AVAILABLE:
+    try:
+        from mlflow import MLflowTracker, model_manager, mlflow_evaluator, metrics_collector
+    except ImportError:
+        # MLflow components not available, will use fallback
+        pass
+
+import logging
+from langchain_groq import ChatGroq
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from evaluation import EvaluationDataset, RAGEvaluator
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+def sliding_window_chunks(text, chunk_size, chunk_overlap):
+    """Custom sliding window chunker using RecursiveCharacterTextSplitter for base splitting."""
+    # First, split into base chunks (no overlap, large size)
+    base_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=0,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""]
+    )
+    base_chunks = base_splitter.split_text(text)
+    # Now, apply sliding window over the base chunks
+    windowed_chunks = []
+    i = 0
+    while i < len(base_chunks):
+        window = ''
+        j = i
+        chars = 0
+        while j < len(base_chunks) and chars + len(base_chunks[j]) <= chunk_size:
+            window += base_chunks[j]
+            chars += len(base_chunks[j])
+            j += 1
+        windowed_chunks.append(window)
+        # Move window forward by chunk_size - chunk_overlap
+        chars_advanced = 0
+        while i < len(base_chunks) and chars_advanced < (chunk_size - chunk_overlap):
+            chars_advanced += len(base_chunks[i])
+            i += 1
+    return windowed_chunks
+
+class EnhancedRAGSystem:
+    def __init__(self):
+        self.embeddings = None
+        self.vectorstore = None
+        self.llm = None
+        self.conversational_chain = None
+        self.memory = None
+        self.text_splitter = None
+        self.evaluator = None
+        self.evaluation_dataset = EvaluationDataset()
+        self.conversation_history = []
+        self.response_times = []
+        self.confidence_scores = []
+        
+        # MLflow integration
+        self.mlflow_enabled = MLFLOW_AVAILABLE
+        if self.mlflow_enabled:
+            try:
+                from mlflow import mlflow_tracker, model_manager, mlflow_evaluator, metrics_collector
+                self.mlflow_tracker = mlflow_tracker
+                self.model_manager = model_manager
+                self.mlflow_evaluator = mlflow_evaluator
+                self.metrics_collector = metrics_collector
+                logger.info("MLflow integration enabled")
+            except ImportError:
+                self.mlflow_enabled = False
+                logger.warning("MLflow components not available")
+        else:
+            logger.info("MLflow not available - using standard logging")
+
+    def initialize_components(self, groq_api_key: str = None):
+        try:
+            api_key = groq_api_key or GROQ_API_KEY
+            if not api_key:
+                raise ValueError("GROQ_API_KEY not found. Please check your .env file.")
+            self.embeddings = get_embeddings()
+            self.llm = ChatGroq(
+                groq_api_key=api_key,
+                model_name=GROQ_MODEL_NAME,
+                temperature=0.05,
+                max_tokens=1500
+            )
+            # Use a custom sliding window chunker based on RecursiveCharacterTextSplitter
+            self.text_splitter = lambda text: sliding_window_chunks(text, CHUNK_SIZE, CHUNK_OVERLAP)
+            self.memory = get_conversation_memory(k=10)
+            logger.info("All components initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error initializing components: {e}")
+            return False
+
+    def create_vectorstore(self, folder_path: str):
+        try:
+            documents = load_documents(folder_path)
+            if not documents:
+                logger.warning("No documents found to process")
+                return False
+            self.vectorstore = create_vectorstore(documents, self.text_splitter, self.embeddings)
+            return True
+        except Exception as e:
+            logger.error(f"Error creating vectorstore: {e}")
+            return False
+
+    def setup_conversational_chain(self):
+        try:
+            custom_prompt = get_custom_prompt()
+            self.conversational_chain = setup_conversational_chain(
+                self.llm, self.vectorstore, self.memory, custom_prompt
+            )
+            return self.conversational_chain is not None
+        except Exception as e:
+            logger.error(f"Error setting up conversational chain: {e}")
+            return False
+
+    def get_response(self, question: str):
+        start_time = datetime.now()
+        try:
+            result = self.conversational_chain({"question": question})
+            end_time = datetime.now()
+            response_time = (end_time - start_time).total_seconds()
+            self.response_times.append(response_time)
+            answer = result.get("answer", "")
+            source_documents = result.get("source_documents", [])
+            confidence = calculate_confidence(question, answer, source_documents)
+            self.confidence_scores.append(confidence)
+            sources = list(set([
+                doc.metadata.get('source_file', 'Unknown') 
+                for doc in source_documents
+            ]))
+            
+            # Log conversation to MLflow if enabled
+            if self.mlflow_enabled and hasattr(self, 'mlflow_tracker'):
+                try:
+                    self.mlflow_tracker.log_conversation(
+                        question=question,
+                        answer=answer,
+                        metadata={
+                            "confidence": confidence,
+                            "response_time": response_time,
+                            "sources_count": len(sources),
+                            "memory_size": len(self.memory.chat_memory.messages)
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to log conversation to MLflow: {e}")
+            
+            # Record metrics if MLflow is enabled
+            if self.mlflow_enabled and hasattr(self, 'metrics_collector'):
+                try:
+                    self.metrics_collector.record_conversation_metrics(
+                        question=question,
+                        answer=answer,
+                        response_time=response_time,
+                        confidence=confidence,
+                        sources_count=len(sources),
+                        memory_size=len(self.memory.chat_memory.messages)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record metrics: {e}")
+            
+            self.conversation_history.append({
+                'question': question,
+                'answer': answer,
+                'timestamp': datetime.now().isoformat(),
+                'sources': sources,
+                'confidence': confidence,
+                'response_time': response_time
+            })
+            
+            return {
+                "answer": answer,
+                "confidence": confidence,
+                "sources": sources,
+                "source_documents": len(source_documents),
+                "response_time": response_time,
+                "retrieved_chunks": [
+                    {
+                        "content": doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content,
+                        "source": doc.metadata.get('source_file', 'Unknown'),
+                        "relevance_score": getattr(doc, 'relevance_score', 0.0)
+                    }
+                    for doc in source_documents
+                ],
+                "memory_context": len(self.memory.chat_memory.messages)
+            }
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            return {
+                "answer": f"I apologize, but I encountered an error: {str(e)}",
+                "confidence": 0.0,
+                "sources": [],
+                "source_documents": 0,
+                "response_time": 0.0,
+                "retrieved_chunks": [],
+                "memory_context": 0
+            }
+
+    def get_conversation_stats(self):
+        return get_conversation_stats(self.conversation_history, self.confidence_scores, self.response_times, self.memory)
+
+    def clear_memory(self):
+        if self.memory:
+            self.memory.clear()
+        self.conversation_history = []
+        self.response_times = []
+        self.confidence_scores = []
+        logger.info("Memory and conversation history cleared")
+
+    def get_memory_summary(self):
+        return get_memory_summary(self.memory)
+
+    def initialize_evaluator(self):
+        self.evaluator = RAGEvaluator(self)
+        logger.info("Evaluation system initialized")
+
+    def run_evaluation(self):
+        if not self.evaluator:
+            self.initialize_evaluator()
+        
+        # Use MLflow evaluator if available
+        if self.mlflow_enabled and hasattr(self, 'mlflow_evaluator'):
+            try:
+                self.mlflow_evaluator.rag_system = self
+                qa_pairs = self.evaluation_dataset.get_qa_pairs()
+                return self.mlflow_evaluator.evaluate_batch(qa_pairs)
+            except Exception as e:
+                logger.error(f"MLflow evaluation failed, falling back to standard: {e}")
+        
+        # Standard evaluation
+        qa_pairs = self.evaluation_dataset.get_qa_pairs()
+        results = []
+        for i, qa_pair in enumerate(qa_pairs):
+            question = qa_pair["question"]
+            try:
+                rag_response = self.get_response(question)
+                predicted_response = rag_response["answer"]
+                evaluation_result = self.evaluator.evaluate_response(
+                    question, predicted_response, qa_pair
+                )
+                evaluation_result["rag_metadata"] = {
+                    "sources": rag_response.get("sources", []),
+                    "source_documents": rag_response.get("source_documents", 0),
+                    "confidence": rag_response.get("confidence", 0.0),
+                    "response_time": rag_response.get("response_time", 0.0)
+                }
+                results.append(evaluation_result)
+            except Exception as e:
+                logger.error(f"Error evaluating question '{question}': {e}")
+                results.append({
+                    "question": question,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                })
+        valid_results = [r for r in results if "error" not in r]
+        import statistics
+        if valid_results:
+            f1_scores = [r["f1_metrics"]["f1"] for r in valid_results]
+            rouge1_scores = [r["rouge_scores"]["rouge1_f"] for r in valid_results]
+            keyword_coverages = [r["keyword_coverage"] for r in valid_results]
+            aggregate_metrics = {
+                "f1_score": {
+                    "mean": statistics.mean(f1_scores),
+                    "std": statistics.stdev(f1_scores) if len(f1_scores) > 1 else 0.0,
+                    "min": min(f1_scores),
+                    "max": max(f1_scores)
+                },
+                "rouge1_f": {
+                    "mean": statistics.mean(rouge1_scores),
+                    "std": statistics.stdev(rouge1_scores) if len(rouge1_scores) > 1 else 0.0
+                },
+                "keyword_coverage": {
+                    "mean": statistics.mean(keyword_coverages),
+                    "std": statistics.stdev(keyword_coverages) if len(keyword_coverages) > 1 else 0.0
+                }
+            }
+        else:
+            aggregate_metrics = {"error": "No valid results to aggregate"}
+        return {
+            "total_questions": len(qa_pairs),
+            "successful_evaluations": len(valid_results),
+            "failed_evaluations": len([r for r in results if "error" in r]),
+            "aggregate_metrics": aggregate_metrics,
+            "individual_results": results,
+            "evaluation_timestamp": datetime.now().isoformat()
+        } 
+----------------------------------------------------------------------------------------------
+app.pyimport streamlit as st
+import logging
+from datetime import datetime
+import json
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import pandas as pd
+import time
+from rag_system import EnhancedRAGSystem, GROQ_API_KEY, GROQ_MODEL_NAME, EMBEDDING_MODEL_NAME, DOCUMENTS_FOLDER, CHUNK_SIZE, CHUNK_OVERLAP, COLLECTION_NAME
+import numpy as np
+
+# MLflow Integration
+try:
+    from mlflow.dashboard import mlflow_dashboard
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    print("Warning: MLflow dashboard not available")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Streamlit page configuration
+st.set_page_config(
+    page_title="🗡️ Zoro - GitHub API Assistant",
+    page_icon="🗡️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better UI
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        background: linear-gradient(90deg, #1f4037 0%, #99f2c8 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        color: white;
+    }
+    
+    .metric-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        text-align: center;
+        color: white;
+        margin: 0.5rem 0;
+    }
+    
+    .chat-message {
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        border-left: 4px solid #667eea;
+    }
+    
+    .user-message {
+        background-color: #f0f2f6;
+        border-left-color: #ff6b6b;
+    }
+    
+    .assistant-message {
+        background-color: #e8f4fd;
+        border-left-color: #4ecdc4;
+    }
+    
+    .status-good {
+        color: #28a745;
+        font-weight: bold;
+    }
+    
+    .status-warning {
+        color: #ffc107;
+        font-weight: bold;
+    }
+    
+    .status-error {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    
+    .sidebar-metric {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 0.5rem;
+        border-radius: 5px;
+        margin: 0.25rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if 'rag_system' not in st.session_state:
+    st.session_state.rag_system = None
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = False
+if 'conversation_history' not in st.session_state:
+    st.session_state.conversation_history = []
+if 'initialization_attempted' not in st.session_state:
+    st.session_state.initialization_attempted = False
+if 'system_stats' not in st.session_state:
+    st.session_state.system_stats = {}
+
+def create_performance_charts():
+    """Create performance visualization charts"""
+    if not st.session_state.rag_system or not st.session_state.rag_system.conversation_history:
+        st.info("📊 No conversation data available yet. Start chatting to see analytics!")
+        return
+    
+    history = st.session_state.rag_system.conversation_history
+    
+    # Create dataframe from conversation history
+    df = pd.DataFrame([
+        {
+            'Question': i+1,
+            'Confidence': conv['confidence'],
+            'Response Time': conv['response_time'],
+            'Sources Used': len(conv['sources']),
+            'Timestamp': conv['timestamp']
+        }
+        for i, conv in enumerate(history)
+    ])
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Confidence Scores Over Time', 'Response Times', 
+                       'Sources Distribution', 'Performance Metrics'),
+        specs=[[{"secondary_y": False}, {"secondary_y": False}],
+               [{"secondary_y": False}, {"type": "indicator"}]]
+    )
+    
+    # Confidence line chart
+    fig.add_trace(
+        go.Scatter(x=df['Question'], y=df['Confidence'], 
+                  mode='lines+markers', name='Confidence',
+                  line=dict(color='#4ecdc4', width=3)),
+        row=1, col=1
+    )
+    
+    # Response time bar chart
+    fig.add_trace(
+        go.Bar(x=df['Question'], y=df['Response Time'], 
+               name='Response Time', marker_color='#ff6b6b'),
+        row=1, col=2
+    )
+    
+    # Sources histogram
+    fig.add_trace(
+        go.Histogram(x=df['Sources Used'], name='Sources Used',
+                    marker_color='#667eea', nbinsx=10),
+        row=2, col=1
+    )
+    
+    # Performance indicator
+    avg_confidence = df['Confidence'].mean()
+    fig.add_trace(
+        go.Indicator(
+            mode="gauge+number+delta",
+            value=avg_confidence,
+            domain={'x': [0, 1], 'y': [0, 1]},
+            title={'text': "Avg Confidence"},
+            delta={'reference': 0.8},
+            gauge={
+                'axis': {'range': [None, 1]},
+                'bar': {'color': "darkblue"},
+                'steps': [
+                    {'range': [0, 0.5], 'color': "lightgray"},
+                    {'range': [0.5, 0.8], 'color': "yellow"},
+                    {'range': [0.8, 1], 'color': "green"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 0.9
+                }
+            }
+        ),
+        row=2, col=2
+    )
+    
+    fig.update_layout(height=600, showlegend=False, 
+                     title_text="📊 Real-time Performance Analytics")
+    
+    return fig
+
+def auto_initialize_system():
+    """Auto-initialize the system on app startup"""
+    if not st.session_state.initialization_attempted and GROQ_API_KEY:
+        st.session_state.initialization_attempted = True
+        
+        # Create progress bar for initialization
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        with st.spinner("🚀 Auto-initializing Enhanced RAG system..."):
+            try:
+                status_text.text("🔧 Initializing components...")
+                progress_bar.progress(20)
+                
+                rag_system = EnhancedRAGSystem()
+                
+                if not rag_system.initialize_components(GROQ_API_KEY):
+                    st.error("Failed to auto-initialize components!")
+                    return False
+                
+                status_text.text("📚 Creating vector store...")
+                progress_bar.progress(50)
+                
+                if not rag_system.create_vectorstore(DOCUMENTS_FOLDER):
+                    st.error("Failed to create vectorstore!")
+                    return False
+                
+                status_text.text("🔗 Setting up conversational chain...")
+                progress_bar.progress(80)
+                
+                if not rag_system.setup_conversational_chain():
+                    st.error("Failed to setup conversational chain!")
+                    return False
+                
+                progress_bar.progress(100)
+                status_text.text("✅ System ready!")
+                
+                st.session_state.rag_system = rag_system
+                st.session_state.initialized = True
+                
+                time.sleep(1)  # Show success message briefly
+                progress_bar.empty()
+                status_text.empty()
+                
+                st.success("✅ System auto-initialized successfully with conversational memory!")
+                return True
+                
+            except Exception as e:
+                st.error(f"Auto-initialization failed: {str(e)}")
+                progress_bar.empty()
+                status_text.empty()
+                return False
+    
+    return st.session_state.initialized
+
+def display_system_metrics():
+    """Display real-time system metrics in sidebar"""
+    if st.session_state.rag_system:
+        stats = st.session_state.rag_system.get_conversation_stats()
+        
+        if stats:
+            st.sidebar.markdown("### 📊 Live Metrics")
+            
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                st.metric("Questions", stats.get('total_questions', 0))
+                st.metric("Avg Confidence", f"{stats.get('avg_confidence', 0):.2f}")
+            
+            with col2:
+                st.metric("Response Time", f"{stats.get('avg_response_time', 0):.2f}s")
+                st.metric("Memory Size", stats.get('memory_size', 0))
+            
+            # Memory summary
+            memory_summary = st.session_state.rag_system.get_memory_summary()
+            st.sidebar.info(f"🧠 **Memory Status**: {memory_summary}")
+        
+        else:
+            st.sidebar.info("📊 No metrics available yet. Start chatting!")
+
+def main():
+    # Header with gradient background
+    st.markdown("""
+        <div class="main-header">
+            <h1>🗡️ Zoro - Enhanced GitHub API Assistant</h1>
+            <p>Powered by LangChain ConversationalRetrievalChain with Memory 🧠</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Auto-initialize system
+    auto_initialize_system()
+    
+    # Sidebar configuration
+    with st.sidebar:
+        st.markdown("### ⚙️ Configuration")
+        
+        # API Key status
+        if GROQ_API_KEY:
+            st.markdown('<p class="status-good">✅ Groq API Key loaded from .env</p>', unsafe_allow_html=True)
+        else:
+            st.markdown('<p class="status-error">❌ No API key found in .env file</p>', unsafe_allow_html=True)
+            st.code("GROQ_API_KEY=your_key_here", language="bash")
+            st.stop()
+        
+        st.markdown("---")
+        
+        # System status
+        st.markdown("### 🚀 System Status")
+        if st.session_state.initialized:
+            st.markdown('<p class="status-good">🟢 System Ready with Memory</p>', unsafe_allow_html=True)
+            st.markdown('<p class="status-good">🧠 Conversational Memory Active</p>', unsafe_allow_html=True)
+        else:
+            st.markdown('<p class="status-warning">🟡 System Not Initialized</p>', unsafe_allow_html=True)
+        
+        # Control buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Reinit", help="Reinitialize system"):
+                st.session_state.initialization_attempted = False
+                st.rerun()
+        
+        with col2:
+            if st.button("🧹 Clear", help="Clear conversation"):
+                if st.session_state.rag_system:
+                    st.session_state.rag_system.clear_memory()
+                st.session_state.conversation_history = []
+                st.success("Memory cleared!")
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Display live metrics
+        display_system_metrics()
+        
+        # MLflow sidebar metrics if available
+        if MLFLOW_AVAILABLE:
+            mlflow_dashboard.render_sidebar_metrics()
+        
+        # System configuration info
+        st.markdown("### 🔧 Configuration")
+        config_data = {
+            "Model": GROQ_MODEL_NAME,
+            "Embeddings": EMBEDDING_MODEL_NAME.split('/')[-1],
+            "Chunk Size": CHUNK_SIZE,
+            "Chunk Overlap": CHUNK_OVERLAP,
+        }
+        
+        for key, value in config_data.items():
+            st.markdown(f"**{key}:** `{value}`")
+    
+    # Main content area
+    if not st.session_state.initialized:
+        st.warning("⚠️ System initialization required. Please wait or check sidebar for errors.")
+        
+        # Show system overview while initializing
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+                ### 🚀 Enhanced Features
+                - ✅ **Conversational Memory**
+                - ✅ **LangChain Framework**
+                - ✅ **Real-time Analytics** 
+                - ✅ **Performance Metrics**
+                - ✅ **Advanced UI/UX**
+            """)
+        
+        with col2:
+            st.markdown("""
+                ### 🔧 Technical Stack
+                - **LLM:** Groq Llama3-70B
+                - **Vector DB:** ChromaDB
+                - **Embeddings:** BGE-Large
+                - **Memory:** Window Buffer
+                - **Chain:** ConversationalRetrieval
+            """)
+        
+        with col3:
+            st.markdown("""
+                ### 📊 Analytics
+                - **Response Times**
+                - **Confidence Scores**
+                - **Source Utilization**
+                - **Memory Usage**
+                - **Performance Trends**
+            """)
+        
+        return
+    
+    # Create tabs for different sections
+    if MLFLOW_AVAILABLE:
+        tab1, tab2, tab3, tab4 = st.tabs(["💬 Chat", "📊 Analytics", "🧪 Evaluation", "🚀 MLflow"])
+    else:
+        tab1, tab2, tab3 = st.tabs(["💬 Chat", "📊 Analytics", "🧪 Evaluation"])
+    
+    with tab1:
+        # Chat interface
+        st.markdown("### 💬 Chat with Zoro")
+        
+        # Suggested questions
+        with st.expander("💡 Suggested Questions", expanded=False):
+            suggestions = [
+                "How do I authenticate with the GitHub API?",
+                "How can I list all repositories for a user?",
+                "What are the rate limits for GitHub API?",  
+                "How do I create a repository using the API?",
+                "What should I do if I get a 404 error from the API?",
+                "How do webhooks work in GitHub?",
+                "How can I search for repositories?",
+                "What are the different types of GitHub tokens?"
+            ]
+            
+            cols = st.columns(2)
+            for i, suggestion in enumerate(suggestions):
+                with cols[i % 2]:
+                    if st.button(f"💭 {suggestion}", key=f"suggestion_{i}"):
+                        # Add to chat and get response
+                        st.session_state.conversation_history.append({
+                            "role": "user",
+                            "content": suggestion
+                        })
+                        
+                        with st.spinner("🤔 Thinking with conversational memory..."):
+                            try:
+                                response_data = st.session_state.rag_system.get_response(suggestion)
+                                
+                                assistant_message = {
+                                    "role": "assistant",
+                                    "content": response_data["answer"],
+                                    "confidence": response_data.get("confidence", 0.0),
+                                    "sources": response_data.get("sources", []),
+                                    "response_time": response_data.get("response_time", 0.0),
+                                    "retrieved_chunks": response_data.get("retrieved_chunks", []),
+                                    "memory_context": response_data.get("memory_context", 0)
+                                }
+                                
+                                st.session_state.conversation_history.append(assistant_message)
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+        
+        # Display conversation history (top)
+        chat_container = st.container()
+        with chat_container:
+            for i, message in enumerate(st.session_state.conversation_history):
+                if message["role"] == "user":
+                    with st.chat_message("user", avatar="👤"):
+                        st.write(message["content"])
+                elif message["role"] == "assistant":
+                    with st.chat_message("assistant", avatar="🗡️"):
+                        st.write(message["content"])
+                        # Display metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            confidence = message.get("confidence", 0.0)
+                            color = "🟢" if confidence > 0.8 else "🟡" if confidence > 0.5 else "🔴"
+                            st.metric("Confidence", f"{confidence:.2f}", delta=None)
+                        with col2:
+                            response_time = message.get("response_time", 0.0)
+                            st.metric("Response Time", f"{response_time:.2f}s")
+                        with col3:
+                            sources_count = len(message.get("sources", []))
+                            st.metric("Sources", sources_count)
+                        with col4:
+                            memory_context = message.get("memory_context", 0)
+                            st.metric("Memory Items", memory_context)
+                        # Expandable sections
+                        if message.get("retrieved_chunks"):
+                            with st.expander("📄 Retrieved Chunks", expanded=False):
+                                for j, chunk in enumerate(message["retrieved_chunks"]):
+                                    st.markdown(f"**Source {j+1}: {chunk['source']}**")
+                                    st.write(chunk["content"])
+                                    if j < len(message["retrieved_chunks"]) - 1:
+                                        st.markdown("---")
+                        if message.get("sources"):
+                            with st.expander("📚 Sources Used", expanded=False):
+                                for source in message["sources"]:
+                                    st.write(f"• {source}")
+
+        # Chat input (bottom, like ChatGPT)
+        prompt = st.chat_input("Ask me anything about GitHub API... (I remember our conversation! 🧠)")
+        if prompt:
+            # Add user message
+            st.session_state.conversation_history.append({
+                "role": "user",
+                "content": prompt
+            })
+            # Display user message immediately
+            with st.chat_message("user", avatar="👤"):
+                st.write(prompt)
+            # Get and display assistant response
+            with st.chat_message("assistant", avatar="🗡️"):
+                with st.spinner("🤔 Thinking with conversational memory..."):
+                    try:
+                        response_data = st.session_state.rag_system.get_response(prompt)
+                        # Display answer
+                        st.write(response_data["answer"])
+                        # Display metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            confidence = response_data.get("confidence", 0.0)
+                            st.metric("Confidence", f"{confidence:.2f}")
+                        with col2:
+                            response_time = response_data.get("response_time", 0.0)
+                            st.metric("Response Time", f"{response_time:.2f}s")
+                        with col3:
+                            sources_count = len(response_data.get("sources", []))
+                            st.metric("Sources", sources_count)
+                        with col4:
+                            memory_context = response_data.get("memory_context", 0)
+                            st.metric("Memory Items", memory_context)
+                        # Store assistant message
+                        assistant_message = {
+                            "role": "assistant",
+                            "content": response_data["answer"],
+                            "confidence": response_data.get("confidence", 0.0),
+                            "sources": response_data.get("sources", []),
+                            "response_time": response_data.get("response_time", 0.0),
+                            "retrieved_chunks": response_data.get("retrieved_chunks", []),
+                            "memory_context": response_data.get("memory_context", 0)
+                        }
+                        st.session_state.conversation_history.append(assistant_message)
+                        # Display expandable sections
+                        if response_data.get("retrieved_chunks"):
+                            with st.expander("📄 Retrieved Chunks", expanded=False):
+                                for j, chunk in enumerate(response_data["retrieved_chunks"]):
+                                    st.markdown(f"**Source {j+1}: {chunk['source']}**")
+                                    st.write(chunk["content"])
+                                    if j < len(response_data["retrieved_chunks"]) - 1:
+                                        st.markdown("---")
+                        if response_data.get("sources"):
+                            with st.expander("📚 Sources Used", expanded=False):
+                                for source in response_data["sources"]:
+                                    st.write(f"• {source}")
+                    except Exception as e:
+                        error_message = f"I apologize, but I encountered an error: {str(e)}"
+                        st.error(error_message)
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": error_message
+                        })
+    
+    with tab2:
+        # Analytics dashboard
+        st.markdown("### 📊 Performance Analytics Dashboard")
+        
+        if st.session_state.rag_system and st.session_state.rag_system.conversation_history:
+            # Display performance charts
+            fig = create_performance_charts()
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Additional metrics
+            stats = st.session_state.rag_system.get_conversation_stats()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.markdown("""
+                    <div class="metric-container">
+                        <h3>Total Questions</h3>
+                        <h2>{}</h2>
+                    </div>
+                """.format(stats.get('total_questions', 0)), unsafe_allow_html=True)
+            
+            with col2:
+                avg_conf = stats.get('avg_confidence', 0)
+                color = "#28a745" if avg_conf > 0.8 else "#ffc107" if avg_conf > 0.5 else "#dc3545"
+                st.markdown("""
+                    <div class="metric-container" style="background: linear-gradient(135deg, {}, #764ba2);">
+                        <h3>Avg Confidence</h3>
+                        <h2>{:.2f}</h2>
+                    </div>
+                """.format(color, avg_conf), unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown("""
+                    <div class="metric-container">
+                        <h3>Avg Response Time</h3>
+                        <h2>{:.2f}s</h2>
+                    </div>
+                """.format(stats.get('avg_response_time', 0)), unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown("""
+                    <div class="metric-container">
+                        <h3>Unique Sources</h3>
+                        <h2>{}</h2>
+                    </div>
+                """.format(stats.get('unique_sources', 0)), unsafe_allow_html=True)
+            
+            # Conversation timeline
+            st.markdown("### 📈 Conversation Timeline")
+            
+            if st.session_state.rag_system.conversation_history:
+                timeline_data = []
+                for i, conv in enumerate(st.session_state.rag_system.conversation_history):
+                    timeline_data.append({
+                        'Question': i + 1,
+                        'Timestamp': pd.to_datetime(conv['timestamp']),
+                        'Confidence': conv['confidence'],
+                        'Response_Time': conv['response_time'],
+                        'Question_Text': conv['question'][:50] + "..." if len(conv['question']) > 50 else conv['question']
+                    })
+                
+                timeline_df = pd.DataFrame(timeline_data)
+                
+                # Interactive timeline chart
+                timeline_fig = px.scatter(
+                    timeline_df, 
+                    x='Timestamp', 
+                    y='Confidence',
+                    size='Response_Time',
+                    hover_data=['Question_Text', 'Response_Time'],
+                    title="Conversation Timeline (Size = Response Time)",
+                    color='Confidence',
+                    color_continuous_scale='RdYlGn'
+                )
+                
+                timeline_fig.update_layout(height=400)
+                st.plotly_chart(timeline_fig, use_container_width=True)
+        
+        else:
+            st.info("📊 No analytics data available yet. Start chatting to see performance metrics!")
+    
+    with tab3:
+        # Evaluation system
+        st.markdown("### 🧪 System Evaluation")
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.write("Evaluate the RAG system performance using predefined Q&A pairs with ground truth answers.")
+            st.info("💡 This will test the system's ability to provide accurate and relevant responses.")
+        
+        with col2:
+            if st.button("🚀 Run Evaluation", type="primary", use_container_width=True):
+                if st.session_state.rag_system:
+                    with st.spinner("Running comprehensive evaluation..."):
+                        try:
+                            # Clear memory before evaluation for consistency
+                            original_memory = st.session_state.rag_system.memory
+                            st.session_state.rag_system.clear_memory()
+                            
+                            evaluation_results = st.session_state.rag_system.run_evaluation()
+                            
+                            # Restore original memory
+                            st.session_state.rag_system.memory = original_memory
+                            
+                            # Display results
+                            st.markdown("### 📊 Evaluation Results")
+                            
+                            if "error" not in evaluation_results["aggregate_metrics"]:
+                                metrics = evaluation_results["aggregate_metrics"]
+                                
+                                # Summary metrics
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    f1_score = metrics['f1_score']['mean']
+                                    st.metric("F1 Score", f"{f1_score:.3f}", f"±{metrics['f1_score']['std']:.3f}")
+                                
+                                with col2:
+                                    rouge_score = metrics['rouge1_f']['mean']
+                                    st.metric("ROUGE-1 F1", f"{rouge_score:.3f}", f"±{metrics['rouge1_f']['std']:.3f}")
+                                
+                                with col3:
+                                    keyword_cov = metrics['keyword_coverage']['mean']
+                                    st.metric("Keyword Coverage", f"{keyword_cov:.3f}", f"±{metrics['keyword_coverage']['std']:.3f}")
+                                
+                                with col4:
+                                    success_rate = evaluation_results["successful_evaluations"] / evaluation_results["total_questions"]
+                                    st.metric("Success Rate", f"{success_rate:.1%}")
+                                
+                                # Visualization of results
+                                eval_data = []
+                                for i, result in enumerate(evaluation_results["individual_results"]):
+                                    if "error" not in result:
+                                        eval_data.append({
+                                            'Question': i + 1,
+                                            'F1_Score': result['f1_metrics']['f1'],
+                                            'ROUGE_F1': result['rouge_scores']['rouge1_f'],
+                                            'Keyword_Coverage': result['keyword_coverage'],
+                                            'Question_Text': result['question'][:30] + "..."
+                                        })
+                                
+                                if eval_data:
+                                    eval_df = pd.DataFrame(eval_data)
+                                    
+                                    # Create evaluation charts
+                                    eval_fig = make_subplots(
+                                        rows=1, cols=3,
+                                        subplot_titles=('F1 Scores', 'ROUGE-1 F1', 'Keyword Coverage')
+                                    )
+                                    
+                                    eval_fig.add_trace(
+                                        go.Bar(x=eval_df['Question'], y=eval_df['F1_Score'], 
+                                              name='F1', marker_color='#4ecdc4'),
+                                        row=1, col=1
+                                    )
+                                    
+                                    eval_fig.add_trace(
+                                        go.Bar(x=eval_df['Question'], y=eval_df['ROUGE_F1'], 
+                                              name='ROUGE', marker_color='#ff6b6b'),
+                                        row=1, col=2
+                                    )
+                                    
+                                    eval_fig.add_trace(
+                                        go.Bar(x=eval_df['Question'], y=eval_df['Keyword_Coverage'], 
+                                              name='Keywords', marker_color='#667eea'),
+                                        row=1, col=3
+                                    )
+                                    
+                                    eval_fig.update_layout(height=400, showlegend=False,
+                                                         title_text="📊 Detailed Evaluation Results")
+                                    
+                                    st.plotly_chart(eval_fig, use_container_width=True)
+                            
+                            # Detailed results
+                            with st.expander("📋 Detailed Results", expanded=False):
+                                for i, result in enumerate(evaluation_results["individual_results"]):
+                                    if "error" not in result:
+                                        st.markdown(f"**Question {i+1}:** {result['question']}")
+                                        
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            st.write("**Metrics:**")
+                                            st.write(f"• F1 Score: {result['f1_metrics']['f1']:.3f}")
+                                            st.write(f"• ROUGE-1 F1: {result['rouge_scores']['rouge1_f']:.3f}")
+                                            st.write(f"• Keyword Coverage: {result['keyword_coverage']:.3f}")
+                                        
+                                        with col2:
+                                            st.write("**Keywords Found:**")
+                                            found = len(result['found_keywords'])
+                                            total = len(result['expected_keywords'])
+                                            st.write(f"• Found: {found}/{total}")
+                                            if result['found_keywords']:
+                                                st.write("• " + ", ".join(result['found_keywords']))
+                                        
+                                        st.write("**System Response:**")
+                                        st.info(result['predicted_response'])
+                                        
+                                        st.markdown("---")
+                            
+                            # Save results
+                            results_file = f"evaluation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                            try:
+                                with open(results_file, 'w') as f:
+                                    json.dump(evaluation_results, f, indent=2)
+                                st.success(f"📁 Results saved to: {results_file}")
+                            except Exception as e:
+                                st.warning(f"Could not save results: {e}")
+                        
+                        except Exception as e:
+                            st.error(f"Evaluation failed: {str(e)}")
+                
+                else:
+                    st.error("Please initialize the system first!")
+    
+    # MLflow Dashboard Tab
+    if MLFLOW_AVAILABLE:
+        with tab4:
+            st.markdown("### 🚀 MLflow Integration Dashboard")
+            
+            # MLflow UI components
+            mlflow_dashboard.render_mlflow_ui()
+            
+            # Experiment overview
+            mlflow_dashboard.render_experiment_overview()
+            
+            # Metrics dashboard
+            mlflow_dashboard.render_metrics_dashboard()
+            
+            # Model registry
+            mlflow_dashboard.render_model_registry()
+            
+            # Evaluation results
+            mlflow_dashboard.render_evaluation_results()
+    
+    # Footer
+    st.markdown("---")
+    footer_text = """
+        <div style='text-align: center; color: #666; font-size: 0.9em; padding: 1rem;'>
+            <p>🗡️ <strong>Zoro - Enhanced GitHub API Assistant</strong></p>
+            <p>Powered by LangChain ConversationalRetrievalChain • Groq Llama3-70B • ChromaDB"""
+    
+    if MLFLOW_AVAILABLE:
+        footer_text += " • MLflow Integration 🚀"
+    
+    footer_text += """</p>
+            <p>Created by <strong>Balaji</strong> • Enhanced with Memory & Analytics 🧠📊</p>
+        </div>
+    """
+    
+    st.markdown(footer_text, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
+    PS C:\Users\balaj\Downloads\nexturn-captstone project\final task> mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlflow_artifacts

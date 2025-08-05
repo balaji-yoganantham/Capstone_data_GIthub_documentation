@@ -1,0 +1,12 @@
+{
+  "conversation_id": "conv_20250731_142338_ec860575",
+  "timestamp": "2025-07-31T14:23:38.356175",
+  "question": "Test question 1",
+  "answer": "Test answer 1",
+  "metadata": {
+    "confidence": 0.85,
+    "response_time": 1.5,
+    "sources_count": 2,
+    "memory_size": 5
+  }
+}

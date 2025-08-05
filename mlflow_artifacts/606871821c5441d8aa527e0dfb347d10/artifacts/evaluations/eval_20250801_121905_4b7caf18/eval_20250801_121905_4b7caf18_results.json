@@ -1,0 +1,11 @@
+{
+  "evaluation_name": "batch-eval-20250801_121905",
+  "evaluation_id": "eval_20250801_121905_d9904c68",
+  "timestamp": "2025-08-01T12:19:05.990062",
+  "total_questions": 8,
+  "successful_evaluations": 0,
+  "failed_evaluations": 8,
+  "success_rate": 0.0,
+  "aggregate_metrics": {},
+  "individual_results": []
+}

@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_20250801_172301_441978cd",
+  "timestamp": "2025-08-01T17:23:01.642907",
+  "question": "give me code for the github ?",
+  "answer": "Confidence Score: 90\n\nBased on the provided context and conversation history, I understand that you are asking about the GitHub API endpoint to retrieve a list of repositories. \n\nThe relevant endpoint for this is `GET /user/repos`, which returns a list of repositories owned by the authenticated user. The example cURL request provided in the context is a correct representation of this endpoint.\n\nHere's a breakdown of the request:\n\n* `GET /user/repos` is the endpoint to retrieve a list of repositories.\n* `Authorization: token YOUR_PERSONAL_ACCESS_TOKEN` is the authentication method, which requires a personal access token.\n* `Accept: application/vnd.github.v3+json` specifies the response format as JSON.\n* `type=owner` is a query parameter that filters the results to only include repositories owned by the authenticated user.\n* `sort=updated` is a query parameter that sorts the results by the last updated date.\n* `per_page=5` is a query parameter that limits the number of results per page to 5.\n\nTo use this endpoint, you would need to replace `YOUR_PERSONAL_ACCESS_TOKEN` with a valid personal access token.\n\nIn the previous conversation, you asked for code related to the GitHub API, and I'm providing this response as a follow-up to that question.",
+  "metadata": {
+    "response_time": 1.867437,
+    "confidence": 0.8999999999999999,
+    "sources_count": 1,
+    "memory_size": 2,
+    "answer_length": 1260,
+    "question_length": 29,
+    "answer_question_ratio": 43.44827586206897
+  }
+}
